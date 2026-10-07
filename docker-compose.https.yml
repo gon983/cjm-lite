@@ -1,0 +1,29 @@
+# Optional HTTPS proxy. Run with -f docker-compose.yml -f docker-compose.https.yml
+services:
+  app:
+    environment:
+      TRUSTED_PROXY_CIDRS: 172.30.87.0/24
+    networks:
+      - web
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Configure DOMAIN in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - web
+networks:
+  web:
+    ipam:
+      config:
+        - subnet: 172.30.87.0/24
+volumes:
+  caddy-data:
+  caddy-config:

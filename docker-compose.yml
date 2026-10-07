@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8090}:8080"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8090}
+      TZ: America/Argentina/Cordoba
+    volumes:
+      - app-data:/data
+    healthcheck:
+      test: ["CMD", "/app", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    cpus: 1.0
+volumes:
+  app-data:

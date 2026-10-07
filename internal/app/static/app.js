@@ -1,0 +1,2 @@
+document.addEventListener('submit',function(event){const message=event.target.dataset.confirm;if(message&&!window.confirm(message))event.preventDefault();});
+document.addEventListener('change',function(event){if(event.target.name!=='state')return;const result=event.target.form.querySelector('[name="result"]');if(result&&(event.target.value==='RESERVADA'||event.target.value==='INICIADA'))result.value='';});
