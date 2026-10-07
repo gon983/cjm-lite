@@ -1,213 +1,144 @@
-# CJM Lite
+# CJM Lite · Cloudflare
 
-Sistema pequeño de gestión de mediaciones del Centro Judicial de Mediación de Córdoba. Un servicio Go, SQLite en WAL, HTML renderizado en servidor, HTMX local y archivos en un volumen persistente. Sin servidor Node, SPA ni servicios de datos adicionales.
+Migración del sistema existente a **un Worker TypeScript/Hono**, D1 y R2 privado. Mantiene el HTML renderizado en servidor, HTMX, CSS, navegación y reglas de negocio. Producción no necesita Docker ni un servidor Node. Node se usa solo para instalar herramientas, ejecutar Wrangler y comandos de mantenimiento.
 
-## Desarrollo y primera ejecución
+Se conservaron las mejoras previas: **DNI**, carga manual/CSV/XLSX, búsqueda en tiempo real sin tildes ni orden, fechas **dd/mm/aaaa**, botones separados **Editar** y **Estado**, calendario de lunes a viernes, un mes calendario de anticipación y cancelación por participante antes de empezar.
 
-Requisitos: Docker con Docker Compose. No necesita instalar Go en el host.
+## Desarrollo local
 
-```bash
-cp .env.example .env
-docker compose up -d
-```
-
-Abrir **http://localhost:8090**. El servicio escucha internamente en 8080; `PORT` configura el puerto publicado del host. El enlace predeterminado es local (`127.0.0.1`).
+Requisitos: Node 22.12+ o 24 LTS y npm, Python 3 solamente para migrar archivos de la versión anterior.
 
 ```bash
-docker compose ps
-docker compose logs --tail=100 app
-curl http://localhost:8090/healthz
-docker compose down
+npm install
+npm run db:migrate
+npm run dev
 ```
 
-`down` conserva el volumen. **`down -v` elimina los datos** y no debe usarse en producción. Cambiar código requiere `docker compose up -d --build`.
+Abrir **http://localhost:8787**. `predev` genera `.dev.vars` con claves aleatorias privadas si no existe. Nunca se sube a Git. D1/R2 locales viven en `.wrangler/state`, una emulación de desarrollo; el Worker usa exclusivamente bindings y no lee filesystem ni SQLite local directamente.
 
 ### Primer administrador
 
-No hay usuario ni contraseña predeterminados. La contraseña se recibe por stdin para que no aparezca en argumentos del proceso ni en el historial. En Bash:
+No hay contraseña predeterminada. En Bash:
 
 ```bash
 read -rsp 'Contraseña inicial (12–72 bytes): ' ADMIN_PASSWORD; echo
-printf '%s\n' "$ADMIN_PASSWORD" | docker compose exec -T app /app create-admin 'Funcionario inicial' admin
+printf '%s\n' "$ADMIN_PASSWORD" | npm run bootstrap -- 'Funcionario inicial' admin
 unset ADMIN_PASSWORD
 ```
 
-Ingrese con `admin` y la contraseña elegida. El comando solo funciona antes de existir el primer administrador. Los siguientes se crean en **Administradores** dentro del panel. No se puede desactivar al último administrador activo.
+El bootstrap solo funciona una vez. Los siguientes administradores se crean en el panel. El login requiere JavaScript para derivar PBKDF2 en el navegador, decisión autorizada para Workers Free. Más detalles: [migración de contraseñas](docs/password-migration.md).
 
-### Importar DNI
+## Despliegue en Cloudflare Free
 
-Desde **DNI habilitados**, puede completar DNI, nombre, apellido y email manualmente, o subir un XLSX o CSV. También puede usar CLI:
-
-```bash
-docker compose cp ./mediadores.csv app:/data/mediadores.csv
-docker compose exec -T app /app import-mediators /data/mediadores.csv
-```
-
-El comando muestra filas leídas, importadas, duplicadas e inválidas y los números de filas con errores. Detecta el formato por contenido, incluso si se cambió la extensión. XLSX: lee la primera hoja. CSV: acepta coma, punto y coma, tabulación o barra vertical, UTF-8 (con o sin BOM), Windows-1252, UTF-16 y UTF-32 (con BOM o con detección de orden de bytes). Cambiar `.csv` a `.xlsx` no convierte el archivo y ya no impide importarlo.
-
-Los encabezados **Apellido, Nombre, DNI y Email** permiten detectar columnas en cualquier orden (también se reconoce Documento y Correo electrónico). Se omiten encabezados repetidos, incluso si solo se identifican Apellido y Nombre. Sin encabezado, la distribución predeterminada es:
-
-| Columna | Dato |
-| --- | --- |
-| A | Apellido |
-| B | Nombre |
-| C | DNI |
-| H | Email |
-
-La asignación está centralizada en `ImportColumns` en [internal/app/imports.go](internal/app/imports.go). Se normalizan espacios, DNI y email. Los DNI ya habilitados o registrados no se sobrescriben. Filas inválidas se omiten y se informan; errores del archivo revierten toda la importación. El XLSX se descomprime con límites de tamaño y se procesa fila a fila, con un máximo de 20.000 filas por importación.
-
-El mediador consulta su DNI en **Registrar DNI habilitado**, comprueba sus datos y completa teléfono, contraseña y foto. La creación y el consumo del DNI son una misma transacción. No hay registro público de funcionarios.
-
-## Uso
-
-- **Mediador:** inicio con próximas mediaciones y noticias; calendario semanal de lunes a viernes; selección de un segundo mediador activo; reservas compartidas entre ambos participantes; cancelación antes de la hora de comienzo, incluso si el funcionario ya cambió su estado administrativo.
-- Las fechas visibles y los campos de fecha usan **dd/mm/aaaa**, incluidas las exportaciones. Los timestamps se muestran en hora de Córdoba.
-- La búsqueda de mediador al reservar se actualiza mientras escribe y reconoce nombre, apellido y DNI, sin distinguir tildes ni el orden de las palabras.
-- **Funcionario:** dashboard útil, mediaciones por ayer/hoy/mañana y fecha, filtros por estado y resultado, corrección de datos y asignaciones, botones separados **Editar** (datos) y **Estado** (estado/resultado), días bloqueados, mediadores, administradores, noticias, DNI, exportaciones y auditoría.
-- El administrador elige libremente `RESERVADA`, `INICIADA`, `FINALIZADA` o `FIRMADA`. Finalizada y firmada requieren `CON_ACUERDO`, `SIN_ACUERDO` o `INCOMPARECENCIA`. No existe firma digital.
-- Bloquear una sede/fecha cancela todas sus mediaciones con `CANCELADA_POR_ADMIN`. Desbloquear permite nuevas reservas, sin restaurar las canceladas.
-- Los horarios, comienzo, cancelación y anticipación usan `America/Argentina/Cordoba`. Se permite hasta la misma fecha del mes siguiente, inclusive; al no existir ese día se usa el último día del mes siguiente.
-- No hay recuperación automática por email. Un funcionario restablece la contraseña y las sesiones anteriores se invalidan.
-
-## Producción y HTTPS
-
-Configurar `.env`:
-
-```dotenv
-APP_ENV=production
-PORT=8090
-BIND_ADDRESS=127.0.0.1
-PUBLIC_URL=https://mediaciones.ejemplo.org
-SESSION_SECRET=REEMPLAZAR_CON_UN_SECRETO_ALEATORIO_DE_AL_MENOS_32_CARACTERES
-DOMAIN=mediaciones.ejemplo.org
-```
-
-Genere el secreto con `openssl rand -hex 32`. Conserve `.env` fuera de Git y respáldelo por separado en un lugar seguro. La aplicación rechaza producción sin secreto suficiente o sin `PUBLIC_URL` HTTPS. Las cookies llevan `Secure` en producción.
-
-Puede usar un reverse proxy existente hacia `127.0.0.1:8090`, o el archivo opcional de Caddy para certificados TLS automáticos:
+Crear una cuenta Cloudflare y autenticar Wrangler. El despliegue actual está en https://cjm-lite.mediacionescba.workers.dev. El procedimiento siguiente sirve para repetirlo o cambiar de cuenta.
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.https.yml up -d --build
-# Para detener esta variante:
-docker compose -f docker-compose.yml -f docker-compose.https.yml down
+npx wrangler login
+npx wrangler d1 create cjm-lite
+npx wrangler r2 bucket create mediaciones-files
 ```
 
-Apunte el DNS del dominio al servidor y habilite 80/443 en la red de Oracle y el firewall. Caddy conserva certificados en volúmenes propios. El servicio Go no se expone públicamente por defecto. La subred del proxy opcional es `172.30.87.0/24`; cámbiela en el override si colisiona con una red existente.
+Copiar el `database_id` real a `wrangler.toml`. El valor de ceros permite desarrollo local, **no es un ID para producción**. El bucket debe permanecer privado: no habilitar `r2.dev` ni un dominio público para archivos personales.
 
-El limitador permite hasta 120 intentos por IP y 15 por usuario en 15 minutos; usa la dirección de conexión. Con otro proxy, configure `TRUSTED_PROXY_CIDRS` únicamente con sus IP/subredes; solo entonces se acepta `X-Forwarded-For`. No configure una red pública amplia. En el override de Caddy ya está definido. Sin proxy se ignoran esas cabeceras.
+Editar `[vars]` en `wrangler.toml`:
 
-### Persistencia y recursos
-
-El volumen `app-data` contiene:
-
-```text
-/data/database/app.sqlite       # SQLite, más WAL/SHM mientras corre
-/data/uploads/mediadores/       # Fotos JPEG ≤800×800
-/data/uploads/news/             # Imágenes de noticias
-/data/exports/                  # XLSX históricos permanentes
-/data/backups/                  # Copias tar.gz
-/data/session-secret           # Secreto local solo para desarrollo
+```toml
+APP_ENV = "production"
+APP_URL = "https://cjm-lite.TU-SUBDOMINIO.workers.dev"
+SESSION_TTL = "43200"
+TIMEZONE = "America/Argentina/Cordoba"
 ```
 
-El contenedor corre como UID 10001. Si reemplaza el volumen por un bind mount, dé a ese UID permisos sobre el directorio. Puede cambiar `DATA_DIR` al ejecutar el binario fuera de Docker; todo el almacenamiento deriva de esa carpeta.
-
-Compose limita la aplicación a 1 CPU y 512 MB. Se serializan escrituras en una conexión SQLite, con `BEGIN IMMEDIATE`, `busy_timeout=10000`, claves foráneas y WAL. La exclusión SQLite también protege frente a una segunda conexión o proceso. Los cupos y conflictos se vuelven a comprobar dentro de la transacción. Los conflictos consideran intervalos solapados incluso entre sedes con distintos horarios.
-
-El hash bcrypt y la conversión de imágenes admiten como máximo dos trabajos simultáneos de cada tipo. El resto recibe un mensaje para reintentar. Fotos: JPEG/PNG reales, 5 MB, hasta 20 megapíxeles, conversión a JPEG calidad 80, nombre aleatorio. No se guardan BLOBs. No hay polling ni WebSockets; los listados grandes usan páginas de 50 registros.
-
-La arquitectura apunta a unos 500 mediadores y picos de 100 usuarios. Las pruebas de carga incluidas miden lecturas concurrentes; **no constituyen una certificación de capacidad en Oracle Always Free**. La CPU, disco y carga real deben medirse en la instancia elegida. La imagen se puede compilar nativamente para AMD64 o ARM64 (Ampere); el driver SQLite usa CGO en la compilación.
-
-## Exportaciones y retención
-
-**Exportar mediaciones** genera un XLSX por rango, guarda permanentemente el archivo y registra administrador, rango, momento y cantidad. El archivo se puede descargar nuevamente desde **Exportaciones**, aun después de limpiar las filas operativas.
-
-La marca de exportación se establece solo después de escribir correctamente el XLSX. Cualquier edición o bloqueo invalida la marca de las filas afectadas y obliga a exportarlas otra vez. La limpieza al iniciar y cada hora elimina solamente fechas con antigüedad **mayor a siete días** en las que todas las mediaciones están exportadas. Las no exportadas se conservan indefinidamente con avisos visibles. Cancelar una reserva por un mediador elimina esa reserva operacional y conserva auditoría, como requiere el flujo de cancelación.
-
-Los XLSX y backups no se eliminan automáticamente. Debe copiarlos fuera de la instancia y vigilar el espacio libre. Las imágenes antiguas de noticias se conservan para que los backups online mantengan referencias válidas; el reemplazo no modifica archivos existentes.
-
-## Backup
+Configurar secretos remotos con valores aleatorios, separados de `.dev.vars`:
 
 ```bash
-./scripts/backup.sh
-# Equivalente:
-docker compose exec -T app /app backup
+npx wrangler secret put SESSION_SECRET
+npx wrangler secret put BOOTSTRAP_SECRET
+npx wrangler d1 migrations apply DB --remote
+npm run typecheck
+npm test
+npm run build
+npx wrangler deploy
 ```
 
-Muestra la ruta del `.tar.gz` generado. Usa `VACUUM INTO` para obtener una imagen consistente de SQLite, incluyendo datos confirmados que estén en WAL; no copia en crudo una base abierta. Agrega imágenes, exportaciones y el secreto local de desarrollo. Los archivos referenciados son inmutables. La copia online puede contener archivos adicionales creados durante el backup, sin afectar las referencias del snapshot.
+Crear el primer administrador remoto con la misma herramienta y URL real. Poner BOOTSTRAP_SECRET en el entorno local de la terminal para ese comando; recibir la contraseña por stdin como en desarrollo. Después:
 
 ```bash
-docker compose cp app:/data/backups/backup-IDENTIFICADOR.tar.gz ./backup.tar.gz
+npx wrangler secret delete BOOTSTRAP_SECRET
 ```
 
-Guarde además `.env` y cualquier configuración propia en un respaldo seguro externo. Puede programar `scripts/backup.sh` con cron. No agregamos un servicio de scheduler.
+Conservar SESSION_SECRET en un respaldo seguro: protege los verificadores de contraseñas, además de CSRF. Cambiarlo sin migración invalida los logins. Cloudflare proporciona HTTPS; Caddy/Docker pertenecen solo a la versión legacy.
 
-### Restauración
+Bindings: **DB** (D1), **FILES** (R2), **ASSETS** (CSS/JS/HTMX). Las rutas públicas de assets se sirven sin ejecutar el Worker; XLSX se descarga solo cuando se usa importación/exportación.
 
-Use únicamente backups propios confiables. Restaure con el servicio detenido; primero conserve una copia del estado actual.
+## Datos y archivos anteriores
+
+El usuario autorizó comenzar sin las cuentas y contraseñas viejas. La copia original, su historia y el dump completo siguen resguardados; no se inventan participantes para importar mediaciones que apuntan a cuentas borradas. Para este corte se copian el padrón pendiente, noticias y bloqueos. El procedimiento es explícito y revisable:
+
+- [Auditoría y plan](docs/cloudflare-migration-plan.md).
+- [SQLite → D1 y archivos → R2](docs/sqlite-to-d1.md).
+- [Contraseñas y autorización del cambio](docs/password-migration.md).
+- El código anterior se conserva en Git (commit `00cbda9`), fuera del runtime actual.
+
+Los scripts preparan snapshot consistente, dump SQL, counts/FK y correspondencias R2. No borran el original. Primero ejecutar y verificar localmente; después usar los mismos archivos con `--remote` sobre una D1 nueva.
+
+## Uso y conservación de datos
+
+**DNI habilitados:** cargar manualmente apellido/nombre/DNI/email, o seleccionar CSV/XLSX, revisar el preview y confirmar. El navegador reconoce encabezados repetidos/reordenados; sin encabezado usa A apellido, B nombre, C DNI y H email. CSV admite UTF-8, Windows-1252 y UTF-16/32. El Worker vuelve a validar todas las filas y escribe lotes de hasta 40. Importar de nuevo no duplica ni sobrescribe DNI ya registrados. Importaciones de varios lotes son reanudables/idempotentes; un lote fallido no revierte los lotes anteriores.
+
+**Fotos/noticias:** máximo original 5 MB y 20 megapíxeles en browser; se convierten a JPEG ≤800×800 antes de subir. El Worker comprueba el formato real, dimensiones ≤800 y tamaño ≤512 KB. R2 guarda objetos privados con keys aleatorias. Los endpoints requieren sesión y referencia válida en D1. No hay BLOBs de imágenes.
+
+**Reservas:** un INSERT SELECT verifica dentro de la misma operación sede/configuración, slots, día hábil, rango de un mes, comienzo futuro, bloqueos, mediadores activos y diferentes, conflictos por intervalos entre sedes y cupos. Edición administrativa usa UPDATE condicional con las mismas reglas si se cambia la asignación. D1 batch une cada operación con auditoría; fallar la auditoría revierte la operación.
+
+**Estados:** ADMIN elige RESERVADA, INICIADA, FINALIZADA o FIRMADA. Los dos últimos requieren resultado. Una cancelación por bloqueo no se restaura al desbloquear ni cambiando estado. Editar datos preserva estado/resultado. Cancelar una reserva antes del inicio elimina su registro operacional, libera cupo y conserva auditoría.
+
+**Exportar mediaciones:** rango de fechas, dataset paginado de 100 filas, archivo XLSX generado en browser y guardado en R2 antes de marcar versiones. Cada página de versiones tiene HMAC; el backend rechaza manifests alterados. Si una mediación cambió mientras se generaba el archivo, queda sin exportar hasta una nueva exportación. El archivo guardado se puede descargar nuevamente. Máximo 5.000 registros por archivo: dividir un historial mayor por fechas.
+
+**Retención:** limpieza programada diaria, solo fechas con antigüedad mayor a siete días completamente exportadas. Ninguna fila no exportada se elimina. El dashboard y panel diario mantienen avisos. Ante un error de transporte ambiguo de D1 se conserva el archivo R2, porque la transacción pudo haberse confirmado. Se prefiere conservar un archivo adicional antes que perder la exportación. Los XLSX y assets de R2 no se limpian automáticamente; conservarlos permite recuperación y evita borrar referencias usadas por backups. No hay SMTP, JWT, polling ni WebSockets.
+
+## Sedes
+
+Editar únicamente `src/config/sites.ts`:
+
+```ts
+export const SITES = [
+  { code: 'COSQUIN', name: 'Cosquín', start: '08:00', end: '15:30', slotMinutes: 90, rooms: 1 },
+  // { code: 'OTRA', name: 'Otra sede', start: '08:00', end: '14:00', slotMinutes: 60, rooms: 2 },
+];
+```
+
+La UI descubre sedes y calcula slots sin filas futuras permanentes. No renombrar/eliminar códigos con reservas históricas ni cambiar duraciones sin revisar esas asignaciones. No hay CRUD de sedes.
+
+## Seguridad y operación
+
+Sesiones criptográficas de 256 bits, solo SHA-256 del token en D1, HttpOnly/Secure/SameSite=Lax, CSRF HMAC en formularios/JSON, control de origen, autorización backend, SQL preparado, HTML escapado, CSP y límites de request. Reset/desactivación revocan sesiones; último admin activo protegido. Login limita 15 intentos por usuario y 120 por IP en 15 minutos, guardando keys HMAC en D1. Los logs JSON registran errores con request ID sin contraseñas/pruebas/tokens. `/healthz` comprueba D1.
+
+Backups:
 
 ```bash
-# Crear carpeta de restauración y extraer el backup.
-mkdir -p restore-data
-tar -xzf backup.tar.gz -C restore-data
-# Detener Go, dejando disponible el contenedor para copiar archivos.
-docker compose stop app
-# Eliminar WAL/SHM antiguos y sustituir SQLite antes de arrancar.
-docker compose run --rm --user root --entrypoint sh app -c 'rm -f /data/database/app.sqlite /data/database/app.sqlite-wal /data/database/app.sqlite-shm'
-docker compose cp ./restore-data/. app:/data/
-docker compose run --rm --user root --entrypoint sh app -c 'chown -R 10001:10001 /data'
-docker compose up -d
-curl http://localhost:8090/healthz
+npx wrangler d1 export DB --remote --output backup-d1.sql
+# Guardar también copia externa privada de objetos R2 y SESSION_SECRET.
 ```
 
-Restaure también `.env` si fuera necesario. Para volver a un estado exacto use un volumen nuevo y copie allí el respaldo; el procedimiento anterior puede conservar archivos sin referencias. No mezcle una base restaurada con WAL/SHM de otra versión. Las sesiones incluidas en el snapshot pueden seguir vigentes: para invalidarlas todas después de restaurar, ejecute con la aplicación detenida `DELETE FROM sessions` mediante una herramienta SQLite, o espere su vencimiento máximo de 12 horas.
+D1 Time Travel ayuda a restaurar, pero no reemplaza el respaldo de R2. Restaurar en D1 nueva, aplicar esquema/importar datos y restituir los objetos/keys y el mismo SESSION_SECRET; verificar FKs/counts antes de mover tráfico. [Procedimiento](docs/sqlite-to-d1.md).
 
-## Agregar una sede
-
-Editar únicamente [internal/app/config.go](internal/app/config.go), agregando una entrada a `Sedes`:
-
-```go
-var Sedes = []Sede{
-    {"COSQUIN", "Cosquín", "08:00", "15:30", 90, 1},
-    {"OTRA", "Otra sede", "08:00", "14:00", 60, 2},
-}
-```
-
-Orden de campos: código estable, nombre visible, apertura, cierre, duración en minutos, salas. Todos los slots se generan al consultar; no hay filas futuras permanentes. La interfaz descubre las sedes automáticamente. Recompilar con `docker compose up -d --build`. No renombre ni elimine códigos con mediaciones aún conservadas. Cambiar horarios o duración con reservas existentes requiere revisar esas reservas primero.
-
-## Migraciones y desarrollo local
-
-La migración 003 renombra los identificadores a `dni` sin eliminar usuarios ni reservas. Los identificadores previos se conservan; el sistema original ya cargaba la columna C del padrón. Se admiten DNI numéricos de hasta ocho dígitos y se normalizan puntos, espacios y ceros iniciales al importar, registrar e iniciar sesión.
-
-Las migraciones SQL están embebidas en [internal/app/migrations](internal/app/migrations). Se aplican automáticamente en una transacción al iniciar y se registran en `schema_migrations`. Agregar una nueva migración numerada `002_descripcion.sql`, sin modificar migraciones ya aplicadas. También existe:
+## Verificación
 
 ```bash
-docker compose exec -T app /app migrate
+npm run typecheck
+npm test
+npm run build
+npm audit
+# Flujo completo en navegador con D1/R2 aislados:
+npm run test:browser
 ```
 
-Con Go 1.25 y compilador C instalados:
+Para el test de navegador use Chrome instalado o ejecute `npx playwright install chromium`. Puede indicar `CJM_CHROME_PATH` si su Chrome está en otra ruta.
 
-```bash
-go run ./cmd/app serve
-go test -race ./...
-go vet ./...
-```
+Los tests ejecutan el Worker con D1 y R2 emulados reales por Cloudflare Vitest, no un mock de las reglas. Incluyen registro, roles, sesiones/reset, límites, conflictos de ambos mediadores, solicitudes HTTP concurrentes, reservas y movimientos al último cupo, rollback por fallo de auditoría, bloqueos, estados, R2, exportaciones con versiones, retención y fragments HTMX. El flujo de navegador también fue comprobado en Chrome desktop/móvil, con PBKDF2, CSV/XLSX reales, resize y downloads.
 
-Sin Go local:
+## Free Tier y límites prácticos
 
-```bash
-./scripts/test.sh
-# Flujo completo en contenedor/volumen de prueba aislados (puerto 18090):
-python3 scripts/smoke.py
-```
+La arquitectura evita cómputo pesado en el Worker; bundle TS/Hono pequeño y assets independientes, consultas indexadas y páginas acotadas, import de 40 filas por lote y una firma por página de exportación. Workers Free: 100.000 requests/día y 10 ms CPU HTTP; D1: 5M filas leídas y 100k escritas/día, 5 GB totales; R2 Standard: 10 GB-month incluidos y cuotas de operaciones. Verificar siempre [límites Workers](https://developers.cloudflare.com/workers/platform/limits/), [precios D1](https://developers.cloudflare.com/d1/platform/pricing/) y [precios R2](https://developers.cloudflare.com/r2/pricing/).
 
-La estructura agrupa módulos sencillos dentro de `internal/app`: configuración, migraciones, usuarios, reservas, almacenamiento, handlers y templates; `cmd/app` es el único ejecutable. CSS, HTMX y JavaScript están embebidos, así que el binario no depende de archivos de frontend externos ni CDN en ejecución.
-
-## Seguridad y pruebas
-
-Sesiones aleatorias de 256 bits, tokens almacenados con SHA-256, expiración a 12 horas, rotación al login, cookies HttpOnly/SameSite=Lax, CSRF HMAC en todo POST, control de origen, autorización de backend, bcrypt, escape HTML, SQL parametrizado, límites de requests y cabeceras CSP. Desactivar una cuenta o restablecer su contraseña invalida sus sesiones. No se almacenan contraseñas en logs.
-
-Auditoría transaccional de registro, creación de admin, activación/desactivación, reset, reserva, edición/estado, cancelación, bloqueo/desbloqueo y exportación. El log operacional es JSON por stderr.
-
-La dependencia XLSX se fijó en Excelize 2.11.0 para incluir las correcciones de [los avisos de seguridad del lector de filas](https://pkg.go.dev/vuln/GO-2026-6453). Puede repetir la revisión con `GOTOOLCHAIN=auto go run golang.org/x/vuln/cmd/govulncheck@latest ./...`.
-
-Las pruebas cubren registro y duplicados, cuentas inactivas, invalidación de sesiones, concurrencia entre dos conexiones SQLite, conflictos de ambos mediadores y sedes, límite mensual, fines de semana, bloqueo/desbloqueo, cancelación en el instante de inicio, estados y resultados, autorización, XLSX, retención e invalidación tras edición, fotos, backup, CSRF y escape/render de todas las pantallas.
+La capacidad estimada es favorable para ~500 mediadores/100 usuarios simultáneos con el volumen operacional de Cosquín. No equivale a certificar 10 ms remotamente: medir CPU/rows/requests en la cuenta antes del corte. Imports, exports muy grandes y búsquedas frecuentes de todos los usuarios pueden agotar cuotas; dividir rangos/lotes y consultar métricas. No hay plan pago habilitado ni despliegue remoto automático.

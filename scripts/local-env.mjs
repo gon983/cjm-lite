@@ -1,0 +1,1 @@
+import {existsSync,writeFileSync} from 'node:fs';import {randomBytes} from 'node:crypto';if(!existsSync('.dev.vars')){writeFileSync('.dev.vars',`SESSION_SECRET=${randomBytes(32).toString('hex')}\nBOOTSTRAP_SECRET=${randomBytes(32).toString('hex')}\n`,{mode:0o600});console.log('Created private local .dev.vars (no production secrets).')}

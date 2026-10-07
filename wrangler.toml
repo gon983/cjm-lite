@@ -1,0 +1,27 @@
+name = "cjm-lite"
+main = "src/index.ts"
+compatibility_date = "2026-10-07"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = false
+
+[vars]
+APP_ENV = "production"
+APP_URL = "https://cjm-lite.mediacionescba.workers.dev"
+SESSION_TTL = "43200"
+TIMEZONE = "America/Argentina/Cordoba"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cjm-lite"
+database_id = "e644f185-429e-4c17-bf1a-6c327de8405a"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "mediaciones-files"
+
+[triggers]
+crons = ["17 6 * * *"]

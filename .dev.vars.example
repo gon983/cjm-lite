@@ -1,0 +1,4 @@
+# Generate locally: openssl rand -hex 32
+SESSION_SECRET=
+# Only for the single-use bootstrap API. Delete after creating the first ADMIN.
+BOOTSTRAP_SECRET=
