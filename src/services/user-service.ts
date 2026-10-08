@@ -231,3 +231,43 @@ export async function importRows(env: Env, actor: number, rows: unknown[]) {
   }
   return { read: rows.length, imported, duplicates, invalid, errors };
 }
+
+export async function updateProfile(
+  env: Env,
+  actor: number,
+  data: Record<string, unknown>,
+  photo = "",
+) {
+  const row = whitelistRow({ ...data, dni: "1" });
+  const telefono = String(data.telefono ?? "").trim();
+  if (!telefono || telefono.length > 60)
+    throw new BusinessError("Complete un teléfono válido.");
+  const current = await stmt(
+    env,
+    "SELECT dni FROM users WHERE id=? AND role='MEDIADOR' AND active=1",
+    actor,
+  ).first<{ dni: string }>();
+  if (!current)
+    throw new BusinessError(
+      "No tiene permiso para modificar este perfil.",
+      403,
+    );
+  const [write] = await env.DB.batch([
+    stmt(
+      env,
+      `UPDATE users SET nombre=?,apellido=?,email=?,telefono=?,photo=CASE WHEN ?='' THEN photo ELSE ? END,search_text=?,updated_at=? WHERE id=? AND role='MEDIADOR' AND active=1`,
+      row.nombre,
+      row.apellido,
+      row.email,
+      telefono,
+      photo,
+      photo,
+      searchText(`${row.apellido} ${row.nombre} ${current.dni}`),
+      stamp(),
+      actor,
+    ),
+    auditAfter(env, actor, "UPDATE_PROFILE", "users", actor),
+  ]);
+  if (write.meta.changes !== 1)
+    throw new BusinessError("No se pudo modificar su perfil.", 403);
+}

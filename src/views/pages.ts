@@ -1,3 +1,4 @@
+import { mediatorWidget } from "./mediator-picker";
 import type { Ctx, Mediation, News, User } from "../types";
 import {
   e,
@@ -38,7 +39,26 @@ export function registerView(
 }
 export function reserveView(c: Ctx, users: User[]) {
   return card(
-    `<p>Usted será el mediador 1. Ambos participantes verán la reserva.</p>${post(c, "/reservar", sitesSelect(c.req.query("sede")) + dateField("Fecha", "date", c.req.query("fecha") ?? "") + field("Hora", "start", c.req.query("hora"), "time", "required") + `<label>Buscar mediador 2<input type="search" name="q" autocomplete="off" placeholder="Nombre, apellido o DNI" hx-get="/mediadores/buscar" hx-trigger="input changed delay:150ms, search" hx-target="#mediator-picker" hx-select="#mediator-picker" hx-swap="outerHTML" hx-sync="this:replace"></label>` + picker(users, c.get("user")!.id) + field("Carátula", "title", "", "text", 'required maxlength="300"') + field("Número de expediente", "case", "", "text", 'required maxlength="120"') + "<button>Confirmar reserva</button>")}`,
+    `<p>Usted será el mediador 1. Ambos participantes verán la reserva.</p>${post(
+      c,
+      "/reservar",
+      sitesSelect(c.req.query("sede")) +
+        dateField("Fecha", "date", c.req.query("fecha") ?? "") +
+        field("Hora", "start", c.req.query("hora"), "time", "required") +
+        mediatorWidget(
+          users.filter((u) => u.id !== c.get("user")!.id),
+          "m2",
+        ) +
+        field("Carátula", "title", "", "text", 'required maxlength="300"') +
+        field(
+          "Número de expediente",
+          "case",
+          "",
+          "text",
+          'required maxlength="120"',
+        ) +
+        "<button>Confirmar reserva</button>",
+    )}`,
     "narrow",
   );
 }
@@ -64,7 +84,7 @@ export function editView(c: Ctx, m: Mediation, users: User[]) {
       c,
       "/admin/editar",
       hidden("id", m.id) +
-        `<div class="form-grid">${sitesSelect(m.sede) + dateField("Fecha", "date", m.date) + field("Hora", "start", m.start, "time", "required") + select("Mediador 1", "m1", opts, String(m.m1)) + select("Mediador 2", "m2", opts, String(m.m2)) + field("Carátula", "title", m.title, "text", 'required maxlength="300"') + field("Expediente", "case", m.case_number, "text", 'required maxlength="120"')}</div><p class="muted">Cambiar sede, fecha, hora o mediadores vuelve a validar disponibilidad y conflictos. Cada cambio exige una nueva exportación.</p><button>Guardar cambios</button>`,
+        `<div class="form-grid">${sitesSelect(m.sede) + dateField("Fecha", "date", m.date) + field("Hora", "start", m.start, "time", "required") + mediatorWidget(users, "m1", m.m1, `${m.name1} · ${m.dni1}`) + mediatorWidget(users, "m2", m.m2, `${m.name2} · ${m.dni2}`) + field("Carátula", "title", m.title, "text", 'required maxlength="300"') + field("Expediente", "case", m.case_number, "text", 'required maxlength="120"')}</div><p class="muted">Cambiar sede, fecha, hora o mediadores vuelve a validar disponibilidad y conflictos. La exportación de mediaciones es opcional.</p><button>Guardar cambios</button>`,
     ),
   );
 }
@@ -162,5 +182,12 @@ export function newsView(
     ) +
     `<div class="cards">${ns.map((n) => `<article class="card"><h2>${e(n.title)}</h2><p>${e(dateES(n.publication_date))} · ${n.published ? "Publicada" : "Borrador"}</p>${link(query("/admin/noticias", { id: n.id }), "Editar")}${post(c, "/admin/noticias", hidden("id", n.id) + hidden("action", "delete") + '<button class="danger">Eliminar</button>', 'data-confirm="¿Eliminar la noticia?"')}</article>`).join("")}</div>` +
     pagination("/admin/noticias", p, more)
+  );
+}
+
+export function profileView(c: Ctx, u: User) {
+  return card(
+    `${u.photo ? `<img class="avatar" src="/uploads/${e(u.photo)}" alt="Foto actual">` : ""}${post(c, "/mi-perfil", field("DNI", "dni", u.dni, "text", 'readonly aria-readonly="true"') + field("Nombre", "nombre", u.nombre, "text", 'required maxlength="100"') + field("Apellido", "apellido", u.apellido, "text", 'required maxlength="100"') + field("Email", "email", u.email, "email", 'required maxlength="254"') + field("Teléfono", "telefono", u.telefono, "tel", 'required maxlength="60"') + `<label>Cambiar foto (opcional, JPEG/PNG, máximo 5 MB)<input type="file" name="photo" accept="image/jpeg,image/png"></label><p class="muted">El DNI identifica tu cuenta y no se modifica desde el perfil.</p><button>Guardar mis datos</button>`, 'enctype="multipart/form-data"')}`,
+    "narrow",
   );
 }

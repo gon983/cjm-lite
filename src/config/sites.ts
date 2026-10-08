@@ -10,8 +10,8 @@ export const SITES: Site[] = [
   {
     code: "COSQUIN",
     name: "Cosquín",
-    start: "08:00",
-    end: "15:30",
+    start: "08:30",
+    end: "16:00",
     slotMinutes: 90,
     rooms: 1,
   },

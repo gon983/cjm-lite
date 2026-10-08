@@ -263,10 +263,6 @@ export async function cleanup(env: Env, now = new Date()) {
   await env.DB.batch([
     stmt(env, `DELETE FROM sessions WHERE expires_at<?`, stamp()),
     stmt(env, `DELETE FROM login_attempts WHERE expires_at<?`, Date.now()),
-    stmt(
-      env,
-      `DELETE FROM mediations WHERE date<? AND exported_at IS NOT NULL AND NOT EXISTS(SELECT 1 FROM mediations other WHERE other.date=mediations.date AND other.exported_at IS NULL)`,
-      cutoff,
-    ),
+    stmt(env, `DELETE FROM mediations WHERE date<=?`, cutoff),
   ]);
 }

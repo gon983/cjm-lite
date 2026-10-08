@@ -89,7 +89,14 @@ routes.post("/registro", async (c) => {
     throw new BusinessError("Seleccione una foto JPEG o PNG.");
   const key = await saveImage(c.env, file, "profiles");
   try {
-    await register(c.env, dni, f(c, "phone"), key, proof(c));
+    const registeredId = await register(
+      c.env,
+      dni,
+      f(c, "phone"),
+      key,
+      proof(c),
+    );
+    c.set("logEntityId", registeredId);
   } catch (e) {
     if (e instanceof BusinessError) await c.env.FILES.delete(key);
     throw e;
@@ -103,13 +110,14 @@ routes.post("/bootstrap", async (c) => {
   )
     throw new BusinessError("Bootstrap no autorizado.", 403);
   const data = await c.req.json<Record<string, string>>();
-  await createAdmin(
+  const createdId = await createAdmin(
     c.env,
     null,
     data.name,
     data.username,
     data as unknown as ReturnType<typeof proof>,
   );
+  c.set("logEntityId", createdId);
   return c.json({ ok: true }, 201);
 });
 export default routes;

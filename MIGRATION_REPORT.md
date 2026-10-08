@@ -38,7 +38,7 @@ Cambios técnicamente necesarios:
 4. CSV/XLSX se parsea en browser y se confirma por lotes de 40, revalidando backend. Lotes son idempotentes; no existe rollback global entre requests de una importación grande.
 5. XLSX se genera en browser, se guarda en R2 y luego se registran export/versions en D1. Hasta 5.000 filas por archivo; rangos mayores se dividen.
 6. Passwords: cambio expresamente autorizado a PBKDF2-HMAC-SHA256 estándar de 600k iteraciones en browser + verificador HMAC con pepper en Worker. Login requiere JavaScript. Ver documentación de seguridad/longitud declarada y persistencia de SESSION_SECRET.
-7. Limpieza diaria en Cron en lugar de ticker de proceso. Conserva más de siete días y nunca elimina fechas con alguna mediación sin exportar.
+7. Política actual autorizada posteriormente: limpieza diaria de todas las mediaciones al cumplir siete días, independientemente de exportación.
 
 ## Schema D1 e índices
 
@@ -62,7 +62,7 @@ Dataset paginado de 100 filas con HMAC por página de pares ID/version, ligado a
 
 **Fallo de transporte ambiguo:** no se borra el objeto durable si D1 pudo haber confirmado la transacción antes de fallar la respuesta. Se prefiere un objeto adicional a dejar registros exportados apuntando a un archivo perdido. La misma precaución se aplica a fotos/noticias al fallar D1 de forma ambigua. No hay limpieza automática de objetos huérfanos.
 
-La limpieza elimina solo días completamente exportados con antigüedad >7 días. XLSX/objetos permanecen disponibles. Ninguna fila sin exportar es candidata.
+La política anterior se reemplazó a pedido del usuario: la limpieza elimina todas las mediaciones al cumplir siete días desde su fecha, exportadas o no. XLSX/objetos ya guardados permanecen disponibles.
 
 ## Datos originales y autorización del reset
 
@@ -105,3 +105,11 @@ Versión corregida: `1eb5540f-d5c8-48f2-ba62-2e8e31283db9`. El secreto fue renov
 ## Cambio de subdominio solicitado
 
 URL actual: https://cjm-lite.mediacionescba.workers.dev. APP_URL actualizado después de que el usuario cambió el subdominio de la cuenta. Se conserva el mismo Worker y los bindings D1/R2.
+
+## Mejoras posteriores solicitadas
+
+Perfil editable propio (datos/foto, DNI fijo y sin cambio de contraseña); autocompletado de mediadores en reserva y edición, por DNI/formato/texto; exportación opcional y retención automática de siete días; UI de Auditoría retirada, manteniendo el audit_log funcional en D1. Logging técnico JSON solo en Workers Logs (retención Free actual de tres días), helper central y `invocation_logs=false`, sin tabla ni bucket técnico. Respaldo privado anterior al cambio: `.migration/backups/before-seven-day-retention.sql`.
+
+## Estado directo en la tabla
+
+La administración de mediaciones ahora permite cambiar estado desde un desplegable en cada fila, guardando automáticamente. Finalizada/Firmada requieren seleccionar resultado en esa misma fila. Se conserva autorización, CSRF y auditoría transaccional; no se necesita abrir la pantalla separada. Verificado con 31 tests y Chrome.

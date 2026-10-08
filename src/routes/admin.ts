@@ -1,3 +1,4 @@
+import { inlineState } from "../views/inline-state";
 import { Hono } from "hono";
 import type { AppEnv, Mediation, User, News } from "../types";
 import { BusinessError } from "../types";
@@ -95,12 +96,7 @@ routes.get("/mediaciones", async (c) => {
       (p - 1) * 50,
     ).all<Mediation>()
   ).results;
-  const pending = await stmt(
-    c.env,
-    "SELECT count(*) AS count FROM mediations WHERE date=? AND exported_at IS NULL",
-    date,
-  ).first<{ count: number }>();
-  const body = `<section id="daily">${date < today() && pending?.count ? `<p class="warning" role="alert">Recordá exportar las mediaciones del ${dateES(date)}. Se eliminarán una vez exportadas y vencido el período operativo. ${link("/admin/exportaciones", "Exportar", "")}</p>` : ""}<form class="toolbar" method="get" action="/admin/mediaciones" hx-get="/admin/mediaciones" hx-target="#daily" hx-select="#daily" hx-swap="outerHTML" hx-push-url="true">${dateField("Fecha", "date", date) + select("Estado", "state", [["", "Todos"], ...STATES.map((s) => [s, s] as [string, string])], state) + select("Resultado", "result", [["", "Todos"], ...RESULTS.map((s) => [s, s] as [string, string])], result)}<button>Filtrar</button></form>${
+  const body = `<section id="daily"><form class="toolbar" method="get" action="/admin/mediaciones" hx-get="/admin/mediaciones" hx-target="#daily" hx-select="#daily" hx-swap="outerHTML" hx-push-url="true">${dateField("Fecha", "date", date) + select("Estado", "state", [["", "Todos"], ...STATES.map((s) => [s, s] as [string, string])], state) + select("Resultado", "result", [["", "Todos"], ...RESULTS.map((s) => [s, s] as [string, string])], result)}<button>Filtrar</button></form>${
     table(
       [
         "Hora / sede",
@@ -115,10 +111,8 @@ routes.get("/mediaciones", async (c) => {
           `${e(m.start)}<br>${e(m.sede)}`,
           `${e(m.case_number)}<br>${e(m.title)}`,
           `${e(m.name1)}<br>${e(m.name2)}`,
-          `${e(m.state)}<br>${e(m.result)}`,
-          link(query("/admin/editar", { id: m.id }), "Editar") +
-            " " +
-            link(query("/admin/estado", { id: m.id }), "Estado"),
+          inlineState(c, m, state, result),
+          link(query("/admin/editar", { id: m.id }), "Editar"),
         ]),
       "Mediaciones del " + dateES(date),
     ) +
@@ -168,6 +162,8 @@ routes.post("/estado", async (c) => {
     f(c, "state"),
     f(c, "result"),
   );
+  if (f(c, "inline") === "1")
+    return c.json({ ok: true, state: f(c, "state"), result: f(c, "result") });
   return redirect(c, "/admin/mediaciones", "Estado actualizado.");
 });
 routes.get("/usuarios", async (c) => {
@@ -201,7 +197,14 @@ routes.post("/usuarios", async (c) => {
   );
 });
 routes.post("/crear-admin", async (c) => {
-  await createAdmin(c.env, actor(c), f(c, "name"), f(c, "username"), proof(c));
+  const createdId = await createAdmin(
+    c.env,
+    actor(c),
+    f(c, "name"),
+    f(c, "username"),
+    proof(c),
+  );
+  c.set("logEntityId", createdId);
   return redirect(c, "/admin/usuarios?role=ADMIN", "Administrador creado.");
 });
 routes.get("/dnis", async (c) => {
@@ -334,14 +337,10 @@ routes.get("/exportaciones", async (c) => {
         count: number;
       }>()
     ).results;
-  const pending = await stmt(
-    c.env,
-    "SELECT count(*) AS count,min(date) AS oldest FROM mediations WHERE exported_at IS NULL",
-  ).first<{ count: number; oldest: string }>();
   return page(
     c,
     "Exportaciones",
-    `${pending?.count ? `<p class="warning">${pending.count} mediaciones pendientes de exportación. Fecha más antigua: ${dateES(pending.oldest)}. Se conservarán hasta que sean exportadas.</p>` : ""}${card(`<form data-export action="/admin/exportar" method="post">${hidden("csrf", c.get("csrf"))}<div class="form-grid">${dateField("Desde", "from", pending?.oldest ?? today()) + dateField("Hasta", "to", today())}</div><button>Exportar mediaciones</button></form><p class="muted">Se genera XLSX en su navegador y se guarda en R2 antes de marcar los registros. El archivo puede descargarse nuevamente.</p><p id="export-progress" role="status"></p>`)}${
+    `<p class="notice">La exportación es opcional. Las mediaciones se eliminan al cumplir 7 días desde su fecha, hayan sido exportadas o no.</p>${card(`<form data-export action="/admin/exportar" method="post">${hidden("csrf", c.get("csrf"))}<div class="form-grid">${dateField("Desde", "from", addDays(today(), -6)) + dateField("Hasta", "to", today())}</div><button>Exportar mediaciones</button></form><p class="muted">Se genera XLSX en su navegador y se guarda en R2 antes de marcar los registros. El archivo puede descargarse nuevamente.</p><p id="export-progress" role="status"></p>`)}${
       table(
         ["Período", "Fecha de exportación", "Registros", "Archivo"],
         rows
@@ -407,38 +406,5 @@ routes.get("/descargar/:file", async (c) => {
       "X-Content-Type-Options": "nosniff",
     },
   });
-});
-routes.get("/auditoria", async (c) => {
-  const p = pageNum(c),
-    rows = (
-      await stmt(
-        c.env,
-        "SELECT a.created_at,coalesce(u.username,'CLI') AS actor,a.action,a.entity,a.entity_id,a.detail FROM audit_log a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.id DESC LIMIT 51 OFFSET ?",
-        (p - 1) * 50,
-      ).all<{
-        created_at: string;
-        actor: string;
-        action: string;
-        entity: string;
-        entity_id: number;
-        detail: string;
-      }>()
-    ).results;
-  return page(
-    c,
-    "Auditoría",
-    table(
-      ["Fecha", "Actor", "Acción", "Entidad", "Detalle"],
-      rows
-        .slice(0, 50)
-        .map((r) => [
-          timestampES(r.created_at),
-          e(r.actor),
-          e(r.action),
-          e(r.entity) + " #" + r.entity_id,
-          e(detailES(r.detail)),
-        ]),
-    ) + pagination("/admin/auditoria", p, rows.length > 50),
-  );
 });
 export default routes;

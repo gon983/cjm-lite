@@ -63,6 +63,8 @@ export type AppEnv = {
     csrf: string;
     form: Record<string, string | File>;
     requestId: string;
+    startedAt: number;
+    logEntityId: number;
   };
 };
 export type Ctx = Context<AppEnv>;

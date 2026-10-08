@@ -1,3 +1,11 @@
+import {
+  pickerResults,
+  resultsId,
+  type MediatorField,
+} from "../views/mediator-picker";
+import { updateProfile } from "../services/user-service";
+import { saveImage } from "../lib/r2";
+import { normalizeDNI } from "../lib/validation";
 import { Hono } from "hono";
 import type { AppEnv, User, Mediation, News, SQLRow } from "../types";
 import { BusinessError } from "../types";
@@ -5,7 +13,12 @@ import { requireUser } from "../middleware/security";
 import { stmt, MED_SELECT, USER_COLUMNS } from "../services/database";
 import { reserve, cancel } from "../services/reservation-service";
 import { page, card, link, query, e, sitesSelect, picker } from "../views/html";
-import { reserveView, mediationCards, newsCards } from "../views/pages";
+import {
+  reserveView,
+  mediationCards,
+  newsCards,
+  profileView,
+} from "../views/pages";
 import {
   today,
   monthLimit,
@@ -39,15 +52,10 @@ routes.get("/", async (c) => {
       ).all<News>()
     ).results;
   if (u.role === "ADMIN") {
-    const [states, pending, blocked] = await c.env.DB.batch<SQLRow>([
+    const [states, blocked] = await c.env.DB.batch<SQLRow>([
       stmt(
         c.env,
         "SELECT state,count(*) AS count FROM mediations WHERE date=? GROUP BY state",
-        today(),
-      ),
-      stmt(
-        c.env,
-        "SELECT count(DISTINCT date) AS count,min(date) AS oldest FROM mediations WHERE date<? AND exported_at IS NULL",
         today(),
       ),
       stmt(
@@ -60,12 +68,11 @@ routes.get("/", async (c) => {
         (n, r) => n + Number(r.count),
         0,
       ),
-      p = pending.results[0],
       b = blocked.results[0];
     return page(
       c,
       "Dashboard",
-      `${Number(p.count) ? `<aside class="warning" role="alert">Hay mediaciones de ${e(p.count)} día(s) pendientes de exportación. La más antigua es del ${e(dateES(String(p.oldest)))}. ${link("/admin/exportaciones", "Exportar mediaciones", "")}. No se eliminarán mientras estén pendientes.</aside>` : ""}<div class="stats">${card(`<span>Mediaciones hoy</span><strong>${total}</strong>`)}${states.results.map((r) => card(`<span>${e(r.state)}</span><strong>${e(r.count)}</strong>`)).join("")}</div><div class="toolbar">${link("/admin/mediaciones", "Abrir panel del día", "button") + link("/admin/exportaciones", "Exportar mediaciones", "")}</div>${b ? `<p class="notice">Próximo día bloqueado: ${e(dateES(String(b.date)))} · ${e(b.reason)}</p>` : ""}${newsCards(news)}`,
+      `<p class="notice">Las mediaciones se eliminan automáticamente al cumplir 7 días desde su fecha. La exportación es opcional.</p><div class="stats">${card(`<span>Mediaciones hoy</span><strong>${total}</strong>`)}${states.results.map((r) => card(`<span>${e(r.state)}</span><strong>${e(r.count)}</strong>`)).join("")}</div><div class="toolbar">${link("/admin/mediaciones", "Abrir panel del día", "button") + link("/admin/exportaciones", "Exportar mediaciones", "")}</div>${b ? `<p class="notice">Próximo día bloqueado: ${e(dateES(String(b.date)))} · ${e(b.reason)}</p>` : ""}${newsCards(news)}`,
     );
   }
   const ms = (
@@ -153,7 +160,7 @@ routes.get("/reservar", requireUser("MEDIADOR"), async (c) =>
   page(c, "Reservar mediación", reserveView(c, await activeUsers(c))),
 );
 routes.post("/reservar", requireUser("MEDIADOR"), async (c) => {
-  await reserve(c.env, c.get("user")!.id, {
+  const createdId = await reserve(c.env, c.get("user")!.id, {
     sede: f(c, "sede"),
     date: f(c, "date"),
     start: f(c, "start"),
@@ -162,6 +169,7 @@ routes.post("/reservar", requireUser("MEDIADOR"), async (c) => {
     title: f(c, "title"),
     case_number: f(c, "case"),
   });
+  c.set("logEntityId", createdId);
   return c.redirect(
     "/mis-mediaciones?mensaje=Reserva%20creada%20para%20ambos%20mediadores.",
     303,
@@ -188,27 +196,65 @@ routes.post("/cancelar", requireUser("MEDIADOR"), async (c) => {
     303,
   );
 });
-routes.get("/mediadores/buscar", requireUser("MEDIADOR"), async (c) => {
-  const terms = searchText(c.req.query("q") ?? "")
+routes.get("/mi-perfil", requireUser("MEDIADOR"), (c) =>
+  page(c, "Mi perfil", profileView(c, c.get("user")!)),
+);
+routes.post("/mi-perfil", requireUser("MEDIADOR"), async (c) => {
+  const file = c.get("form").photo;
+  const key =
+    file instanceof File && file.size
+      ? await saveImage(c.env, file, "profiles")
+      : "";
+  try {
+    await updateProfile(
+      c.env,
+      c.get("user")!.id,
+      {
+        nombre: f(c, "nombre"),
+        apellido: f(c, "apellido"),
+        email: f(c, "email"),
+        telefono: f(c, "telefono"),
+      },
+      key,
+    );
+  } catch (e) {
+    if (key && e instanceof BusinessError) await c.env.FILES.delete(key);
+    throw e;
+  }
+  c.set("logEntityId", c.get("user")!.id);
+  return c.redirect("/mi-perfil?mensaje=Datos%20actualizados.", 303);
+});
+routes.get("/mediadores/buscar", async (c) => {
+  const field: MediatorField = c.req.query("field") === "m1" ? "m1" : "m2";
+  if (field === "m1" && c.get("user")!.role !== "ADMIN")
+    throw new BusinessError("No tiene permiso.", 403);
+  let raw = (c.req.query("q_" + field) ?? c.req.query("q") ?? "").slice(0, 255);
+  if (raw.length > 254) throw new BusinessError("Búsqueda demasiado larga.");
+  if (/^[0-9.\s]+$/.test(raw)) raw = normalizeDNI(raw);
+  const terms = searchText(raw)
+    .replace(/,/g, " ")
     .split(/\s+/)
-    .filter(Boolean);
-  if (terms.join(" ").length > 254)
-    throw new BusinessError("Búsqueda demasiado larga.");
+    .filter(Boolean)
+    .map((t) => (/^[0-9.]+$/.test(t) ? t.replaceAll(".", "") : t));
   const clauses = terms.map(() => `search_text LIKE ? ESCAPE '\\'`),
     args = terms.map((t) => "%" + t.replace(/[\\%_]/g, (v) => "\\" + v) + "%");
+  const excluded =
+    c.get("user")!.role === "MEDIADOR"
+      ? c.get("user")!.id
+      : id(c.req.query("exclude"));
   const users = (
     await stmt(
       c.env,
-      `SELECT ${USER_COLUMNS} FROM users WHERE role='MEDIADOR' AND active=1 AND id<>? ${clauses.length ? "AND " + clauses.join(" AND ") : ""} ORDER BY apellido,nombre LIMIT 50`,
-      c.get("user")!.id,
+      `SELECT id,nombre,apellido,dni FROM users WHERE role='MEDIADOR' AND active=1 AND id<>? ${clauses.length ? "AND " + clauses.join(" AND ") : ""} ORDER BY apellido,nombre LIMIT 50`,
+      excluded,
       ...args,
     ).all<User>()
   ).results;
   return page(
     c,
     "Buscar mediador",
-    picker(users, c.get("user")!.id),
-    "mediator-picker",
+    pickerResults(users, field),
+    resultsId(field),
   );
 });
 export default routes;

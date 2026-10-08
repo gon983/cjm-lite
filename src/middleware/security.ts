@@ -6,7 +6,6 @@ import { hmac, sha256, randomToken, equal } from "../lib/crypto";
 import { stmt, USER_COLUMNS, stamp } from "../services/database";
 import { dateInput } from "../lib/dates";
 export const security = createMiddleware<AppEnv>(async (c, next) => {
-  c.set("requestId", randomToken().slice(0, 16));
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Frame-Options", "DENY");
   c.header("Referrer-Policy", "same-origin");

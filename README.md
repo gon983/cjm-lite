@@ -2,7 +2,7 @@
 
 Migración del sistema existente a **un Worker TypeScript/Hono**, D1 y R2 privado. Mantiene el HTML renderizado en servidor, HTMX, CSS, navegación y reglas de negocio. Producción no necesita Docker ni un servidor Node. Node se usa solo para instalar herramientas, ejecutar Wrangler y comandos de mantenimiento.
 
-Se conservaron las mejoras previas: **DNI**, carga manual/CSV/XLSX, búsqueda en tiempo real sin tildes ni orden, fechas **dd/mm/aaaa**, botones separados **Editar** y **Estado**, calendario de lunes a viernes, un mes calendario de anticipación y cancelación por participante antes de empezar.
+Se conservaron las mejoras previas: **DNI**, carga manual/CSV/XLSX, búsqueda en tiempo real sin tildes ni orden, fechas **dd/mm/aaaa**, botón **Editar** y desplegable de estado en cada fila, calendario de lunes a viernes, un mes calendario de anticipación y cancelación por participante antes de empezar.
 
 ## Desarrollo local
 
@@ -94,7 +94,16 @@ Los scripts preparan snapshot consistente, dump SQL, counts/FK y correspondencia
 
 **Exportar mediaciones:** rango de fechas, dataset paginado de 100 filas, archivo XLSX generado en browser y guardado en R2 antes de marcar versiones. Cada página de versiones tiene HMAC; el backend rechaza manifests alterados. Si una mediación cambió mientras se generaba el archivo, queda sin exportar hasta una nueva exportación. El archivo guardado se puede descargar nuevamente. Máximo 5.000 registros por archivo: dividir un historial mayor por fechas.
 
-**Retención:** limpieza programada diaria, solo fechas con antigüedad mayor a siete días completamente exportadas. Ninguna fila no exportada se elimina. El dashboard y panel diario mantienen avisos. Ante un error de transporte ambiguo de D1 se conserva el archivo R2, porque la transacción pudo haberse confirmado. Se prefiere conservar un archivo adicional antes que perder la exportación. Los XLSX y assets de R2 no se limpian automáticamente; conservarlos permite recuperación y evita borrar referencias usadas por backups. No hay SMTP, JWT, polling ni WebSockets.
+**Retención:** a pedido del usuario, las mediaciones se eliminan automáticamente al cumplir **7 días desde su fecha**, incluso sin exportar y cualquiera sea su estado. Cron diario a las 03:17 de Córdoba. Ejemplo: 07/10 → eliminable desde 14/10. La exportación XLSX es opcional; los archivos ya guardados permanecen disponibles. No hay bloqueo de limpieza por `exported_at`. Antes del cambio se hizo un backup privado de D1. No hay SMTP, JWT, polling ni WebSockets.
+
+**Mi perfil:** los mediadores editan nombre, apellido, email, teléfono y foto. El DNI/usuario, rol, estado y contraseña permanecen protegidos. El restablecimiento de contraseña sigue a cargo del administrador.
+
+**Búsqueda de mediadores:** un campo autocompletable muestra sugerencias mientras escribe, admite texto en cualquier orden/tildes y DNI parcial o con puntos. Se usa al reservar y para ambos participantes al editar. La selección queda en un ID validado por backend; escribir texto sin elegir un resultado no envía una asignación.
+
+**Auditoría:** se retiró su pantalla y enlace. El audit_log de negocio permanece en D1, transaccional y separado de los logs técnicos. No se guardan logs técnicos en D1/R2.
+
+**Logs de producción:** configuración Workers Observability, eventos JSON centralizados en `src/lib/logging.ts`, request_id y X-Request-ID, actor/rol, entidad e ID, duración y códigos/ubicación segura de errores internos. Sin bodies, query strings, emails, DNI, contraseñas, pruebas, cookies, hashes o tokens. GET/HTMX exitosos no producen eventos propios y `invocation_logs=false` evita registrar cada invocación. Ver [logging](docs/production-logging.md).
+
 
 ## Sedes
 
@@ -102,7 +111,7 @@ Editar únicamente `src/config/sites.ts`:
 
 ```ts
 export const SITES = [
-  { code: 'COSQUIN', name: 'Cosquín', start: '08:00', end: '15:30', slotMinutes: 90, rooms: 1 },
+  { code: 'COSQUIN', name: 'Cosquín', start: '08:30', end: '16:00', slotMinutes: 90, rooms: 1 },
   // { code: 'OTRA', name: 'Otra sede', start: '08:00', end: '14:00', slotMinutes: 60, rooms: 2 },
 ];
 ```

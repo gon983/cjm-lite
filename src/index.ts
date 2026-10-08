@@ -1,3 +1,4 @@
+import { requestLogging, logError, log } from "./lib/logging";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { AppEnv } from "./types";
@@ -11,6 +12,7 @@ import { stmt } from "./services/database";
 import { layout, e, card, link } from "./views/html";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 const app = new Hono<AppEnv>();
+app.use("*", requestLogging);
 app.use(
   "*",
   bodyLimit({
@@ -66,16 +68,7 @@ app.notFound((c) =>
 );
 app.onError((err, c) => {
   const known = err instanceof BusinessError;
-  console.error(
-    JSON.stringify({
-      event: "request_error",
-      requestId: c.get("requestId"),
-      path: c.req.path,
-      message: known
-        ? err.message
-        : err.message.replace(/[a-f0-9]{64}/gi, "[redacted]"),
-    }),
-  );
+  logError(c, err);
   const status = (known ? err.status : 500) as ContentfulStatusCode,
     message = known
       ? err.message
@@ -104,6 +97,17 @@ export default {
     env: AppEnv["Bindings"],
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(cleanup(env));
+    ctx.waitUntil(
+      cleanup(env).catch((err) => {
+        log("error", "retention_cleanup_failed", {
+          request_id: crypto.randomUUID(),
+          route: "scheduled",
+          method: "CRON",
+          error_code: "CLEANUP_FAILED",
+          error_type: err instanceof Error ? err.name : "Error",
+        });
+        throw new Error("Scheduled cleanup failed");
+      }),
+    );
   },
 };

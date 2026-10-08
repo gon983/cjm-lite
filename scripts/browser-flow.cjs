@@ -198,6 +198,22 @@ const BASE = process.env.CJM_SMOKE_URL || "http://localhost:8790";
     mediators.push(p);
   }
   const [first, second] = mediators;
+  await first.goto(BASE + "/mi-perfil");
+  if (await first.locator("[name=dni]").isEditable())
+    throw Error("DNI editable");
+  await first.locator("[name=nombre]").fill("María Sol");
+  await first.locator("[name=email]").fill("profile@example.com");
+  await first.locator("[name=telefono]").fill("3519876543");
+  await first.locator("[name=photo]").setInputFiles({
+    name: "updated.png",
+    mimeType: "image/png",
+    buffer: photo,
+  });
+  await first.getByRole("button", { name: "Guardar mis datos" }).click();
+  await first.waitForURL(/mensaje=Datos/);
+  if ((await first.locator("[name=nombre]").inputValue()) !== "María Sol")
+    throw Error("Profile edit failed");
+
   await first.goto(BASE + "/calendario");
   if (
     !(await first.evaluate(
@@ -211,13 +227,10 @@ const BASE = process.env.CJM_SMOKE_URL || "http://localhost:8790";
     .getAttribute("href");
   const day = new URL(slot, BASE).searchParams.get("fecha");
   await first.goto(BASE + slot);
-  await first.locator("[name=q]").fill("garcia juan");
-  await first.waitForFunction(
-    () => document.querySelector("#mediator2").options.length === 2,
-  );
+  await first.locator("[data-mediator-search]").fill("garcia juan");
   await first
-    .locator("#mediator2")
-    .selectOption({ label: "García Juan · 32285678" });
+    .getByRole("option", { name: "García Juan · 32285678", exact: true })
+    .click();
   await first.locator("[name=title]").fill("Smoke Cloudflare");
   await first.locator("[name=case]").fill("EXP-CF-123");
   await first.getByRole("button", { name: "Confirmar reserva" }).click();
@@ -233,16 +246,27 @@ const BASE = process.env.CJM_SMOKE_URL || "http://localhost:8790";
     .click();
   if (await admin.locator("[name=state]").count())
     throw Error("combined edit/state");
+  await admin
+    .locator('[data-mediator-widget="m1"] [data-mediator-search]')
+    .fill("32.281.234");
+  await admin
+    .getByRole("option", { name: "Pérez María Sol · 32281234", exact: true })
+    .click();
+  await admin
+    .locator('[data-mediator-widget="m2"] [data-mediator-search]')
+    .fill("garcia juan");
+  await admin
+    .getByRole("option", { name: "García Juan · 32285678", exact: true })
+    .click();
   await admin.locator("[name=title]").fill("Corrected Cloudflare");
   await admin.getByRole("button", { name: "Guardar cambios" }).click();
   await admin.goto(BASE + "/admin/mediaciones?date=" + day);
-  await admin
-    .getByRole("link", { name: "Estado", exact: true })
-    .first()
-    .click();
-  await admin.locator("[name=state]").selectOption("FINALIZADA");
-  await admin.locator("[name=result]").selectOption("CON_ACUERDO");
-  await admin.getByRole("button", { name: "Guardar estado" }).click();
+  const rowState = admin.locator("[data-inline-state]").first();
+  await rowState.locator("[name=state]").selectOption("FINALIZADA");
+  await rowState.locator("[name=result]").selectOption("CON_ACUERDO");
+  await rowState.getByText("Estado actualizado.").waitFor();
+  if (!admin.url().includes("/admin/mediaciones"))
+    throw Error("Inline state navigated away");
   await admin.goto(BASE + "/admin/exportaciones");
   await admin.locator("[name=from]").fill(day.split("-").reverse().join("/"));
   await admin.locator("[name=to]").fill(day.split("-").reverse().join("/"));
@@ -298,7 +322,6 @@ const BASE = process.env.CJM_SMOKE_URL || "http://localhost:8790";
     "/admin/dnis",
     "/admin/exportaciones",
     "/admin/noticias",
-    "/admin/auditoria",
   ]) {
     const response = await admin.goto(BASE + url);
     if (response.status() !== 200)

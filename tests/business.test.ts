@@ -58,7 +58,7 @@ async function fixture() {
 const booking = (ids: number[]): Booking => ({
   sede: "COSQUIN",
   date: "2026-10-08",
-  start: "08:00",
+  start: "08:30",
   m1: ids[0],
   m2: ids[1],
   title: "Carátula",
@@ -199,7 +199,7 @@ describe("D1 reservation rules", () => {
       { ...booking(ids), date: "2026-10-10" },
       { ...booking(ids), date: "2026-10-06" },
       { ...booking(ids), sede: "NO" },
-      { ...booking(ids), start: "08:30" },
+      { ...booking(ids), start: "08:00" },
       { ...booking(ids), m2: ids[0] },
     ])
       await expect(reserve(env, ids[0], m, now)).rejects.toThrow();
@@ -225,7 +225,7 @@ describe("D1 reservation rules", () => {
     await cancel(env, ids[1], id, now);
     const again = await reserve(env, ids[2], booking(ids.slice(2)), now);
     await expect(
-      cancel(env, ids[2], again, new Date("2026-10-08T11:00:00Z")),
+      cancel(env, ids[2], again, new Date("2026-10-08T11:30:00Z")),
     ).rejects.toThrow();
     expect((await mediation(again)).state).toBe("RESERVADA");
   });
@@ -249,7 +249,7 @@ describe("D1 reservation rules", () => {
     const id2 = await reserve(
       env,
       ids[2],
-      { ...booking(ids.slice(2)), start: "09:30" },
+      { ...booking(ids.slice(2)), start: "10:00" },
       now,
     );
     await expect(
@@ -257,7 +257,7 @@ describe("D1 reservation rules", () => {
         env,
         admin,
         id2,
-        { ...booking(ids.slice(2)), start: "08:00" },
+        { ...booking(ids.slice(2)), start: "08:30" },
         now,
       ),
     ).rejects.toThrow();
@@ -461,10 +461,10 @@ describe("files, exports and retention", () => {
     ).rejects.toThrow();
     expect((await req("/uploads/" + key, null)).status).toBe(303);
   });
-  it("export file exists before marks; edits invalidate and non-exported records never clean", async () => {
+  it("optional export stores the file before marks and preserves version checks", async () => {
     const { admin, ids } = await fixture();
     const id = await reserve(env, ids[0], booking(ids), now);
-    await cleanup(env, new Date("2026-10-30T12:00:00Z"));
+    await cleanup(env, new Date("2026-10-14T12:00:00Z"));
     expect(await mediation(id)).not.toBeNull();
     const dataset = await exportPage(env, admin, "08/10/2026", "08/10/2026", 0);
     expect(dataset.rows[0].values[1]).toBe("08/10/2026");
@@ -515,7 +515,7 @@ describe("files, exports and retention", () => {
       file,
     );
     expect(stale.marked).toBe(0);
-    await cleanup(env, new Date("2026-10-30T12:00:00Z"));
+    await cleanup(env, new Date("2026-10-14T12:00:00Z"));
     expect(await mediation(id)).not.toBeNull();
     const fresh = await exportPage(env, admin, "2026-10-08", "2026-10-08", 0);
     await confirmExport(
@@ -580,7 +580,7 @@ describe("atomicity and HTTP races", () => {
     const payload = (m2: number) => ({
       sede: "COSQUIN",
       date: dateES(day),
-      start: "08:00",
+      start: "08:30",
       m2: String(m2),
       title: "HTTP race",
       case: "EXP-RACE",
@@ -622,16 +622,16 @@ describe("atomicity and HTTP races", () => {
       second = await reserve(
         env,
         ids[2],
-        { ...booking(ids.slice(2)), start: "09:30" },
+        { ...booking(ids.slice(2)), start: "10:00" },
         now,
       );
     const rs = await Promise.allSettled([
-      editDetails(env, admin, first, { ...booking(ids), start: "14:00" }, now),
+      editDetails(env, admin, first, { ...booking(ids), start: "14:30" }, now),
       editDetails(
         env,
         admin,
         second,
-        { ...booking(ids.slice(2)), start: "14:00" },
+        { ...booking(ids.slice(2)), start: "14:30" },
         now,
       ),
     ]);
@@ -640,7 +640,7 @@ describe("atomicity and HTTP races", () => {
       (
         await stmt(
           env,
-          "SELECT count(*) AS count FROM mediations WHERE start='14:00'",
+          "SELECT count(*) AS count FROM mediations WHERE start='14:30'",
         ).first<{ count: number }>()
       )?.count,
     ).toBe(1);

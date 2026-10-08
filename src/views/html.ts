@@ -89,9 +89,11 @@ export function layout(c: Ctx, title: string, body: string) {
               ["/admin/exportaciones", "Exportaciones"],
               ["/admin/bloqueos", "Días bloqueados"],
               ["/admin/usuarios?role=ADMIN", "Administradores"],
-              ["/admin/auditoria", "Auditoría"],
             ]
-          : [["/mis-mediaciones", "Mis mediaciones"]]),
+          : [
+              ["/mis-mediaciones", "Mis mediaciones"],
+              ["/mi-perfil", "Mi perfil"],
+            ]),
       ]
     : [];
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${e(title)} · CJM</title><link rel="stylesheet" href="/static/app.css"><meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false}'><script src="/static/htmx.min.js" defer></script><script src="/static/app.js" defer></script><script src="/static/forms.js" defer></script>${c.req.path.startsWith("/admin/dnis") || c.req.path.startsWith("/admin/exportaciones") ? '<script src="/static/spreadsheets.js" defer></script>' : ""}</head><body hx-history="false"><a class="skip" href="#main">Ir al contenido</a><header><a class="brand" href="/">CJM <span>Centro Judicial de Mediación</span></a>${u ? `<div class="identity">${e(u.nombre)} · ${e(u.role)}${post(c, "/logout", '<button class="secondary">Salir</button>')}</div>` : ""}</header>${u ? `<nav aria-label="Navegación principal">${links.map(([url, label]) => link(url, label, "")).join("")}</nav>` : ""}<main id="main"><h1>${e(title)}</h1>${c.req.query("mensaje") ? `<p class="notice" role="status">${e(c.req.query("mensaje"))}</p>` : ""}${body}</main><footer>CJM · Córdoba · Horarios de Argentina</footer></body></html>`;

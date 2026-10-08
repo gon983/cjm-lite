@@ -77,7 +77,6 @@ export async function login(
     !user.active ||
     !(await verifyProof(env.SESSION_SECRET, proof, user.password))
   ) {
-    console.warn(JSON.stringify({ event: "login_failed" }));
     throw new BusinessError("Credenciales inválidas o cuenta inactiva.");
   }
   const token = randomToken(),
