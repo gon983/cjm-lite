@@ -340,3 +340,51 @@ it("unexpected backend failure logs safe technical detail and shows no stack/pas
     spy.mockRestore();
   }
 });
+
+
+it("calendar uses venue hours; site filters and blocks isolate venues; exports preserve their scope", async () => {
+  const { SITES } = await import("../src/config/sites");
+  const { exportPage, confirmExport } = await import("../src/services/export-service");
+  const { block } = await import("../src/services/reservation-service");
+  const { today, addDays, weekday } = await import("../src/lib/dates");
+  const { admin, ids } = await fixture();
+  SITES.push({ code: "OTHER", name: "Otra sede", start: "08:30", end: "16:00", slotMinutes: 90, rooms: 1 });
+  try {
+    const booking = { sede: "COSQUIN", date: "2026-10-08", start: "08:30", m1: ids[0], m2: ids[1], title: "Solo Cosquín", case_number: "C" };
+    const first = await reserve(env, ids[0], booking, new Date("2026-10-07T12:00:00Z"));
+    const second = await reserve(env, ids[0], { ...booking, sede: "OTHER", start: "10:00", title: "Solo otra sede" }, new Date("2026-10-07T12:00:00Z"));
+    const response = await request("/admin/mediaciones?date=08/10/2026&sede=COSQUIN", admin);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Solo Cosquín");
+    expect(html).not.toContain("Solo otra sede");
+    expect(html).toContain('value="COSQUIN" selected');
+    const dataset = await exportPage(env, admin, "2026-10-08", "2026-10-08", 0, "COSQUIN");
+    expect(dataset.rows.map(r => r.id)).toEqual([first]);
+    const manifest = [{ rows: dataset.rows.map(r => ({ id: r.id, version: r.version })), signature: dataset.signature }];
+    const bytes = new Uint8Array(128); bytes.set([80, 75, 3, 4]);
+    const file = new File([bytes], "x.xlsx");
+    await expect(confirmExport(env, admin, "2026-10-08", "2026-10-08", manifest, file, "OTHER")).rejects.toThrow("dataset");
+    await confirmExport(env, admin, "2026-10-08", "2026-10-08", manifest, file, "COSQUIN");
+    expect((await stmt(env, "SELECT exported_at FROM mediations WHERE id=?", second).first<{exported_at: string | null}>())?.exported_at).toBeNull();
+    const history = await request("/admin/exportaciones?sede=COSQUIN", admin);
+    expect(await history.text()).toContain("Descargar XLSX");
+    expect(await (await request("/admin/exportaciones?sede=OTHER", admin)).text()).not.toContain("Descargar XLSX");
+    await block(env, admin, "COSQUIN", "2026-10-08", "Sólo esta sede", false);
+    expect((await stmt(env, "SELECT state FROM mediations WHERE id=?", first).first<{state: string}>())?.state).toBe("CANCELADA_POR_ADMIN");
+    expect((await stmt(env, "SELECT state FROM mediations WHERE id=?", second).first<{state: string}>())?.state).toBe("RESERVADA");
+    expect(await (await request("/admin/bloqueos?sede=OTHER", admin)).text()).not.toContain("Sólo esta sede");
+    let calendarDay = today();
+    while ([0, 6].includes(weekday(calendarDay))) calendarDay = addDays(calendarDay, 1);
+    await block(env, admin, "COSQUIN", calendarDay, "Calendario", false);
+    const calendar = await (await request("/calendario?sede=COSQUIN&semana=" + calendarDay, admin)).text();
+    expect(calendar).toContain("Día bloqueado");
+    expect(await (await request("/calendario?sede=OTHER&semana=" + calendarDay, admin)).text()).not.toContain("Día bloqueado");
+    expect(calendar).toContain("Horario 08:30 a 16:00");
+    for (const time of ["08:30", "10:00", "11:30", "13:00", "14:30"]) expect(calendar).toContain(`<strong>${time}</strong>`);
+    expect(calendar).not.toContain("<strong>08:00</strong>");
+    for (const path of ["/admin/mediaciones", "/admin/exportaciones", "/admin/bloqueos", "/admin/exportar/datos?from=08/10/2026&to=08/10/2026"]) {
+      expect((await request(path + (path.includes("?") ? "&" : "?") + "sede=INVALID", admin)).status).toBe(400);
+    }
+  } finally { SITES.pop(); }
+});

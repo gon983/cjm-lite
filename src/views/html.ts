@@ -43,11 +43,11 @@ export const select = (
   attrs = "",
 ) =>
   `<label>${e(label)}<select name="${e(name)}" ${attrs}>${values.map(([v, l]) => `<option value="${e(v)}" ${v === chosen ? "selected" : ""}>${e(l)}</option>`).join("")}</select></label>`;
-export const sitesSelect = (chosen = SITES[0].code) =>
+export const sitesSelect = (chosen = SITES[0].code, all = false) =>
   select(
     "Sede",
     "sede",
-    SITES.map((s) => [s.code, s.name]),
+    [...(all ? [["", "Todas las sedes"] as [string, string]] : []), ...SITES.map((s) => [s.code, s.name] as [string, string])],
     chosen,
   );
 export const STATES = [

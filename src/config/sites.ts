@@ -1,3 +1,4 @@
+import { BusinessError } from "../types";
 export interface Site {
   code: string;
   name: string;
@@ -61,3 +62,8 @@ export function validateSites() {
   }
 }
 validateSites();
+
+export function siteFilter(code = "") {
+  if (code && !site(code)) throw new BusinessError("Sede inválida.");
+  return code;
+}

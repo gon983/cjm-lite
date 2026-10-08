@@ -202,6 +202,7 @@
                 from: values.get("from"),
                 to: values.get("to"),
                 cursor: String(cursor),
+                sede: values.get("sede") || "",
               }),
           );
           const result = await response.json();
@@ -227,6 +228,7 @@
         data.set("csrf", csrf);
         data.set("from", values.get("from"));
         data.set("to", values.get("to"));
+        data.set("sede", values.get("sede") || "");
         data.set("manifest", JSON.stringify(manifest));
         data.set(
           "xlsx",

@@ -1,3 +1,4 @@
+import { siteFilter } from "../config/sites";
 import { inlineState } from "../views/inline-state";
 import { Hono } from "hono";
 import type { AppEnv, Mediation, User, News } from "../types";
@@ -75,11 +76,16 @@ const mediation = async (c: {
 routes.get("/mediaciones", async (c) => {
   const date = dateInput(c.req.query("date") ?? today());
   if (!validDate(date)) throw new BusinessError("Fecha inválida.");
+  const sede = siteFilter(c.req.query("sede"));
   const state = c.req.query("state") ?? "",
     result = c.req.query("result") ?? "",
     p = pageNum(c);
   const params: (string | number)[] = [date];
   let sql = MED_SELECT + "WHERE m.date=?";
+  if (sede) {
+    sql += " AND m.sede=?";
+    params.push(sede);
+  }
   if (state) {
     sql += " AND m.state=?";
     params.push(state);
@@ -96,7 +102,7 @@ routes.get("/mediaciones", async (c) => {
       (p - 1) * 50,
     ).all<Mediation>()
   ).results;
-  const body = `<section id="daily"><form class="toolbar" method="get" action="/admin/mediaciones" hx-get="/admin/mediaciones" hx-target="#daily" hx-select="#daily" hx-swap="outerHTML" hx-push-url="true">${dateField("Fecha", "date", date) + select("Estado", "state", [["", "Todos"], ...STATES.map((s) => [s, s] as [string, string])], state) + select("Resultado", "result", [["", "Todos"], ...RESULTS.map((s) => [s, s] as [string, string])], result)}<button>Filtrar</button></form>${
+  const body = `<section id="daily"><form class="toolbar" method="get" action="/admin/mediaciones" hx-get="/admin/mediaciones" hx-target="#daily" hx-select="#daily" hx-swap="outerHTML" hx-push-url="true">${dateField("Fecha", "date", date) + sitesSelect(sede, true) + select("Estado", "state", [["", "Todos"], ...STATES.map((s) => [s, s] as [string, string])], state) + select("Resultado", "result", [["", "Todos"], ...RESULTS.map((s) => [s, s] as [string, string])], result)}<button>Filtrar</button></form>${
     table(
       [
         "Hora / sede",
@@ -118,6 +124,7 @@ routes.get("/mediaciones", async (c) => {
     ) +
     pagination("/admin/mediaciones", p, rows.length > 50, {
       date,
+      sede,
       state,
       result,
     })
@@ -127,7 +134,7 @@ routes.get("/mediaciones", async (c) => {
     "Mediaciones del día",
     (c.req.header("HX-Request")
       ? ""
-      : `<div class="toolbar">${link(query("/admin/mediaciones", { date: addDays(today(), -1) }), "Ayer") + link("/admin/mediaciones", "Hoy", "button") + link(query("/admin/mediaciones", { date: addDays(today(), 1) }), "Mañana")}</div>`) +
+      : `<div class="toolbar">${link(query("/admin/mediaciones", { date: addDays(today(), -1), sede, state, result }), "Ayer") + link(query("/admin/mediaciones", { date: today(), sede, state, result }), "Hoy", "button") + link(query("/admin/mediaciones", { date: addDays(today(), 1), sede, state, result }), "Mañana")}</div>`) +
       body,
     "daily",
   );
@@ -241,24 +248,26 @@ routes.post("/importar", async (c) => {
   return c.json(await importRows(c.env, actor(c), data.rows));
 });
 routes.get("/bloqueos", async (c) => {
+  const sede = siteFilter(c.req.query("sede"));
   const rows = (
     await stmt(
       c.env,
-      "SELECT sede,date,reason FROM blocked_days ORDER BY date DESC LIMIT 200",
+      "SELECT sede,date,reason FROM blocked_days WHERE (?='' OR sede=?) ORDER BY date DESC LIMIT 200",
+      sede, sede,
     ).all<{ sede: string; date: string; reason: string }>()
   ).results;
   const form = card(
     post(
       c,
       "/admin/bloqueos",
-      `<div class="form-grid">${sitesSelect() + dateField("Fecha", "date", "") + field("Motivo opcional", "reason", "", "text", 'maxlength="300"')}</div><p>Se cancelarán todas las mediaciones existentes para esa sede y fecha.</p><button class="danger">Bloquear día</button>`,
+      `<div class="form-grid">${sitesSelect(sede || undefined) + dateField("Fecha", "date", "") + field("Motivo opcional", "reason", "", "text", 'maxlength="300"')}</div><p>Se cancelarán todas las mediaciones existentes para esa sede y fecha.</p><button class="danger">Bloquear día</button>`,
       'data-confirm="¿Bloquear el día y cancelar todas sus mediaciones?"',
     ),
   );
   return page(
     c,
     "Días bloqueados",
-    form +
+    `<form class="toolbar" method="get" action="/admin/bloqueos">${sitesSelect(sede, true)}<button>Filtrar</button></form>` + form +
       `<div class="cards">${rows.map((r) => card(`<h2>${dateES(r.date)} · ${e(r.sede)}</h2><p>${e(r.reason)}</p>${post(c, "/admin/bloqueos", hidden("sede", r.sede) + hidden("date", r.date) + hidden("action", "unblock") + '<button class="secondary">Desbloquear sin restaurar reservas</button>')}`)).join("") || "<p>No hay días bloqueados.</p>"}</div>`,
   );
 });
@@ -273,7 +282,7 @@ routes.post("/bloqueos", async (c) => {
   );
   return redirect(
     c,
-    "/admin/bloqueos",
+    query("/admin/bloqueos", { sede: f(c, "sede") }),
     "Calendario actualizado. Desbloquear no restaura reservas canceladas.",
   );
 });
@@ -322,11 +331,13 @@ routes.post("/noticias", async (c) => {
   return redirect(c, "/admin/noticias", "Noticia actualizada.");
 });
 routes.get("/exportaciones", async (c) => {
+  const sede = siteFilter(c.req.query("sede"));
   const p = pageNum(c),
     rows = (
       await stmt(
         c.env,
-        "SELECT id,date_from,date_to,created_at,filename,count FROM exports ORDER BY id DESC LIMIT 51 OFFSET ?",
+        "SELECT id,date_from,date_to,created_at,filename,count,sede FROM exports WHERE (?='' OR sede=?) ORDER BY id DESC LIMIT 51 OFFSET ?",
+        sede, sede,
         (p - 1) * 50,
       ).all<{
         id: number;
@@ -335,23 +346,25 @@ routes.get("/exportaciones", async (c) => {
         created_at: string;
         filename: string;
         count: number;
+        sede: string;
       }>()
     ).results;
   return page(
     c,
     "Exportaciones",
-    `<p class="notice">La exportación es opcional. Las mediaciones se eliminan al cumplir 7 días desde su fecha, hayan sido exportadas o no.</p>${card(`<form data-export action="/admin/exportar" method="post">${hidden("csrf", c.get("csrf"))}<div class="form-grid">${dateField("Desde", "from", addDays(today(), -6)) + dateField("Hasta", "to", today())}</div><button>Exportar mediaciones</button></form><p class="muted">Se genera XLSX en su navegador y se guarda en R2 antes de marcar los registros. El archivo puede descargarse nuevamente.</p><p id="export-progress" role="status"></p>`)}${
+    `<form class="toolbar" method="get" action="/admin/exportaciones">${sitesSelect(sede, true)}<button>Filtrar historial</button></form><p class="notice">La exportación es opcional. Las mediaciones se eliminan al cumplir 7 días desde su fecha, hayan sido exportadas o no.</p>${card(`<form data-export action="/admin/exportar" method="post">${hidden("csrf", c.get("csrf"))}<div class="form-grid">${sitesSelect(sede, true) + dateField("Desde", "from", addDays(today(), -6)) + dateField("Hasta", "to", today())}</div><button>Exportar mediaciones</button></form><p class="muted">Se genera XLSX en su navegador y se guarda en R2 antes de marcar los registros. El archivo puede descargarse nuevamente.</p><p id="export-progress" role="status"></p>`)}${
       table(
-        ["Período", "Fecha de exportación", "Registros", "Archivo"],
+        ["Período", "Sede", "Fecha de exportación", "Registros", "Archivo"],
         rows
           .slice(0, 50)
           .map((r) => [
             dateES(r.date_from) + " – " + dateES(r.date_to),
+            e(r.sede || "Todas las sedes"),
             timestampES(r.created_at),
             String(r.count),
             link("/admin/descargar/" + r.id, "Descargar XLSX", ""),
           ]),
-      ) + pagination("/admin/exportaciones", p, rows.length > 50)
+      ) + pagination("/admin/exportaciones", p, rows.length > 50, { sede })
     }`,
   );
 });
@@ -363,6 +376,7 @@ routes.get("/exportar/datos", async (c) =>
       c.req.query("from") ?? "",
       c.req.query("to") ?? "",
       Number(c.req.query("cursor")) || 0,
+      c.req.query("sede") ?? "",
     ),
   ),
 );
@@ -383,6 +397,7 @@ routes.post("/exportar", async (c) => {
     f(c, "to"),
     manifest,
     file,
+    f(c, "sede"),
   );
   return c.json({ ...result, download: "/admin/descargar/" + result.id });
 });

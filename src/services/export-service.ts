@@ -1,3 +1,4 @@
+import { siteFilter } from "../config/sites";
 import { BusinessError, type Env, type Mediation } from "../types";
 import { dateInput, validDate, dateES, timestampES } from "../lib/dates";
 import { hmac, equal, randomToken } from "../lib/crypto";
@@ -24,7 +25,9 @@ export async function exportPage(
   from: string,
   to: string,
   cursor: number,
+  sede = "",
 ) {
+  sede = siteFilter(sede);
   from = dateInput(from);
   to = dateInput(to);
   if (!validDate(from) || !validDate(to) || from > to)
@@ -32,10 +35,11 @@ export async function exportPage(
   const result = await stmt(
     env,
     MED_SELECT +
-      `WHERE m.date BETWEEN ? AND ? AND m.id>? ORDER BY m.id LIMIT 100`,
+      `WHERE m.date BETWEEN ? AND ? AND m.id>? AND (?='' OR m.sede=?) ORDER BY m.id LIMIT 100`,
     from,
     to,
     cursor,
+    sede, sede,
   ).all<Mediation>();
   const rows = result.results.map((m) => ({
     values: [
@@ -59,7 +63,7 @@ export async function exportPage(
   }));
   const signature = await hmac(
     env.SESSION_SECRET,
-    `export-page:${actor}:${from}:${to}:${JSON.stringify(rows.map((r) => ({ id: r.id, version: r.version })))}`,
+    `export-page:${actor}:${from}:${to}:${sede ? `sede=${sede}:` : ""}${JSON.stringify(rows.map((r) => ({ id: r.id, version: r.version })))}`,
   );
   return {
     signature,
@@ -68,6 +72,7 @@ export async function exportPage(
     next: rows.length === 100 ? rows[rows.length - 1].id : null,
     from,
     to,
+    sede,
   };
 }
 interface VersionRef {
@@ -85,7 +90,9 @@ export async function confirmExport(
   to: string,
   pages: Manifest[],
   file: File,
+  sede = "",
 ) {
+  sede = siteFilter(sede);
   from = dateInput(from);
   to = dateInput(to);
   if (
@@ -118,7 +125,7 @@ export async function confirmExport(
         page.signature,
         await hmac(
           env.SESSION_SECRET,
-          `export-page:${actor}:${from}:${to}:${JSON.stringify(refs)}`,
+          `export-page:${actor}:${from}:${to}:${sede ? `sede=${sede}:` : ""}${JSON.stringify(refs)}`,
         ),
       )
     )
@@ -152,7 +159,7 @@ export async function confirmExport(
     const results = await env.DB.batch([
       stmt(
         env,
-        `INSERT INTO exports(date_from,date_to,created_at,admin_id,filename,count,manifest) SELECT ?,?,?,?,?,?,? WHERE ${adminSQL}`,
+        `INSERT INTO exports(date_from,date_to,created_at,admin_id,filename,count,manifest,sede) SELECT ?,?,?,?,?,?,?,? WHERE ${adminSQL}`,
         from,
         to,
         ts,
@@ -160,6 +167,7 @@ export async function confirmExport(
         key,
         manifest.length,
         JSON.stringify(manifest),
+        sede,
         actor,
       ),
       stmt(

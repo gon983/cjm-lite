@@ -152,7 +152,7 @@ routes.get("/calendario", async (c) => {
   return page(
     c,
     "Calendario semanal",
-    `<section id="calendar"><form class="toolbar" action="/calendario" method="get" hx-get="/calendario" hx-target="#calendar" hx-select="#calendar" hx-swap="outerHTML" hx-push-url="true">${sitesSelect(code)}<input type="hidden" name="semana" value="${week}"><button>Ver calendario</button></form><div class="toolbar">${addDays(week, -7) >= addDays(today(), -7) ? nav(addDays(week, -7), "← Anterior") : ""}<strong>Semana del ${dateES(week)}</strong>${addDays(week, 7) <= limit ? nav(addDays(week, 7), "Siguiente →") : ""}</div><p class="muted">${e(s.name)} · Reservas hasta el ${dateES(limit)} · Lunes a viernes</p><div class="calendar">${days}</div></section>`,
+    `<section id="calendar"><form class="toolbar" action="/calendario" method="get" hx-get="/calendario" hx-target="#calendar" hx-select="#calendar" hx-swap="outerHTML" hx-push-url="true">${sitesSelect(code)}<input type="hidden" name="semana" value="${week}"><button>Ver calendario</button></form><div class="toolbar">${addDays(week, -7) >= addDays(today(), -7) ? nav(addDays(week, -7), "← Anterior") : ""}<strong>Semana del ${dateES(week)}</strong>${addDays(week, 7) <= limit ? nav(addDays(week, 7), "Siguiente →") : ""}</div><p class="muted">${e(s.name)} · Horario ${e(s.start)} a ${e(s.end)} · Reservas hasta el ${dateES(limit)} · Lunes a viernes</p><div class="calendar">${days}</div></section>`,
     "calendar",
   );
 });
